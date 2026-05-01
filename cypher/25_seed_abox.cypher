@@ -147,6 +147,52 @@ MATCH (b:Bank      {lei:row[0]})
 MATCH (e:LegalEntity {lei:row[1]})
 MERGE (b)-[l:LENDS_TO]->(e) SET l.exposure_musd = row[2];
 
+// --- 25.7b  Cross-group relationships (eliminate disconnected nodes) ---
+// Joint ventures, supply chains, minority stakes linking "independents" into the network
+UNWIND [
+  // Helios Renewables is 30%-owned by Apex Energy (energy sector synergy)
+  ['LEI0000000000000APEX3','LEI0000000000000IND001', 30],
+  // Borealis Tech is 20%-owned by Northwind Securities (tech investment)
+  ['LEI0000000000000NW0003','LEI0000000000000IND002', 20],
+  // Cobalt Capital manages money for Meridian (15% stake)
+  ['LEI0000000000000MR0001','LEI0000000000000IND004', 15],
+  // Vanta Insurance underwrites for Apex Insurance (25% cross-holding)
+  ['LEI0000000000000APEX7','LEI0000000000000IND005', 25]
+] AS row
+MATCH (parent:LegalEntity {lei:row[0]})
+MATCH (child:LegalEntity  {lei:row[1]})
+MERGE (parent)-[o:HAS_OWNERSHIP_IN]->(child) SET o.percent=row[2], o.weight=toFloat(row[2])/100.0;
+
+// Supply chain / service relationships
+UNWIND [
+  ['LEI0000000000000IND001','LEI0000000000000APEX4'],   // Helios supplies renewable energy to Apex Tech
+  ['LEI0000000000000IND002','LEI0000000000000MR0003'],  // Borealis Tech supplies to Meridian Tech
+  ['LEI0000000000000IND005','LEI0000000000000NW0001']   // Vanta insures Northwind Group
+] AS row
+MATCH (supplier:LegalEntity {lei:row[0]})
+MATCH (client:LegalEntity   {lei:row[1]})
+MERGE (supplier)-[:SUPPLIES_TO]->(client);
+
+// Joint ventures connecting groups
+UNWIND [
+  ['LEI0000000000000IND004','LEI0000000000000BNK001'],  // Cobalt Capital co-manages with Sentinel Bank
+  ['LEI0000000000000IND001','LEI0000000000000MR0001']   // Helios & Meridian renewable energy JV
+] AS row
+MATCH (a:LegalEntity {lei:row[0]})
+MATCH (b:LegalEntity {lei:row[1]})
+MERGE (a)-[:JOINT_VENTURE]->(b);
+
+// Lending to independents
+UNWIND [
+  ['LEI0000000000000BNK001','LEI0000000000000IND001', 75.0],   // Sentinel lends to Helios
+  ['LEI0000000000000BNK002','LEI0000000000000IND002', 45.0],   // Pacifica lends to Borealis
+  ['LEI0000000000000BNK001','LEI0000000000000IND004', 120.0],  // Sentinel lends to Cobalt
+  ['LEI0000000000000BNK002','LEI0000000000000IND005', 90.0]    // Pacifica lends to Vanta
+] AS row
+MATCH (b:Bank      {lei:row[0]})
+MATCH (e:LegalEntity {lei:row[1]})
+MERGE (b)-[l:LENDS_TO]->(e) SET l.exposure_musd = row[2];
+
 // --- 25.8  Link our seeded entities to the FIBO class (if loaded) ----
 // (no-op if BE not yet loaded)
 OPTIONAL MATCH (corpClass:Class) WHERE corpClass.uri ENDS WITH 'Corporation'

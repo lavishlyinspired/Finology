@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>FIBO Graph Explorer — Full Structure</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+<style>
+  :root { --bg:#0f172a; --panel:#1e293b; --text:#e2e8f0; --accent:#38bdf8; --border:#334155; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.4 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--panel); padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; color: var(--accent); white-space: nowrap; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .controls label { font-size: 11px; color: #94a3b8; }
+  .controls select, .controls input, .controls button {
+    padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: inherit;
+  }
+  .controls button { background: var(--accent); color: #0f172a; border: 0; font-weight: 600; cursor: pointer; }
+  .controls button:hover { opacity: 0.9; }
+  .controls button.sec { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+  #status { font-size: 11px; color: #94a3b8; margin-left: auto; }
+  #error { color: #f87171; font-size: 12px; padding: 4px 20px; background: #1c1917; display: none; }
+  .main-area { flex: 1; display: flex; overflow: hidden; }
+  #graph { flex: 1; background: #0a0f1a; }
+  aside { width: 280px; background: var(--panel); border-left: 1px solid var(--border); padding: 12px; overflow: auto; }
+  aside h3 { font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 6px; }
+  aside h3:first-child { margin-top: 0; }
+  .legend-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .legend-line { width: 20px; height: 3px; flex-shrink: 0; border-radius: 2px; }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 12px; }
+  .stats-grid .k { color: #94a3b8; } .stats-grid .v { color: var(--text); font-weight: 600; text-align: right; }
+  #details { font-size: 12px; margin-top: 8px; }
+  #details pre { background: var(--bg); padding: 8px; border-radius: 4px; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+  .filter-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  .filter-tags span { font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--border); cursor: pointer; }
+  .filter-tags span.active { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>FIBO Graph Explorer</h1>
+  <div class="controls">
+    <label>Neo4j:
+      <input id="url" value="neo4j://127.0.0.1:7687" style="width:180px"/>
+    </label>
+    <label>User: <input id="user" value="neo4j" style="width:60px"/></label>
+    <label>Pwd: <input id="pwd" type="password" value="12345678" style="width:80px"/></label>
+    <button id="btnLoad">Load Graph</button>
+    <select id="layoutSelect">
+      <option value="physics">Force-directed</option>
+      <option value="hierarchical">Hierarchical</option>
+      <option value="radial">Radial</option>
+    </select>
+    <button class="sec" id="btnFit">Fit</button>
+    <button class="sec" id="btnExport">Export PNG</button>
+  </div>
+  <span id="status">Not loaded</span>
+</header>
+<div id="error"></div>
+<div class="main-area">
+  <div id="graph"></div>
+  <aside>
+    <h3>Legend — Nodes</h3>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Bank</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#22d3ee"></div>Holding</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>Corporation</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#34d399;border-radius:2px"></div>Jurisdiction</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f472b6;clip-path:polygon(50% 0%,0% 100%,100% 100%)"></div>Regulator</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#64748b"></div>Class (ontology)</div>
+
+    <h3>Legend — Edges</h3>
+    <div class="legend-item"><div class="legend-line" style="background:#38bdf8"></div>HAS_OWNERSHIP_IN</div>
+    <div class="legend-item"><div class="legend-line" style="background:#f87171"></div>HAS_CONTROLLING_PARTY</div>
+    <div class="legend-item"><div class="legend-line" style="background:#fbbf24"></div>LENDS_TO</div>
+    <div class="legend-item"><div class="legend-line" style="background:#a3e635"></div>JOINT_VENTURE</div>
+    <div class="legend-item"><div class="legend-line" style="background:#fb923c"></div>SUPPLIES_TO</div>
+    <div class="legend-item"><div class="legend-line" style="background:#34d399"></div>INCORPORATED_IN</div>
+    <div class="legend-item"><div class="legend-line" style="background:#f472b6"></div>REGULATED_BY</div>
+    <div class="legend-item"><div class="legend-line" style="background:#475569"></div>SCO (subClassOf)</div>
+
+    <h3>Filter Layers</h3>
+    <div class="filter-tags" id="filters">
+      <span class="active" data-layer="entities">Entities</span>
+      <span class="active" data-layer="ownership">Ownership</span>
+      <span class="active" data-layer="control">Control</span>
+      <span class="active" data-layer="lending">Lending</span>
+      <span class="active" data-layer="supply">Supply/JV</span>
+      <span data-layer="jurisdiction">Jurisdictions</span>
+      <span data-layer="ontology">Ontology</span>
+    </div>
+
+    <h3>Statistics</h3>
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <h3>Selection</h3>
+    <div id="details"><em>Click a node or edge</em></div>
+  </aside>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let network, nodesDS, edgesDS, allNodes = [], allEdges = [];
+
+const NODE_COLORS = {
+  Bank: '#f59e0b', Holding: '#22d3ee', Corporation: '#a78bfa',
+  LegalEntity: '#818cf8', Jurisdiction: '#34d399', Regulator: '#f472b6',
+  Sector: '#94a3b8', Class: '#64748b'
+};
+const EDGE_COLORS = {
+  HAS_OWNERSHIP_IN: '#38bdf8', HAS_CONTROLLING_PARTY: '#f87171',
+  LENDS_TO: '#fbbf24', INCORPORATED_IN: '#34d399', OPERATES_IN: '#94a3b8',
+  REGULATED_BY: '#f472b6', SCO: '#475569', SUPPLIES_TO: '#fb923c',
+  JOINT_VENTURE: '#a3e635', RDF_TYPE: '#6b7280'
+};
+const LAYER_MAP = {
+  entities: { nodeLabels: ['Bank','Holding','Corporation','LegalEntity'], edges: [] },
+  ownership: { nodeLabels: [], edges: ['HAS_OWNERSHIP_IN'] },
+  control: { nodeLabels: [], edges: ['HAS_CONTROLLING_PARTY'] },
+  lending: { nodeLabels: [], edges: ['LENDS_TO'] },
+  supply: { nodeLabels: [], edges: ['SUPPLIES_TO','JOINT_VENTURE'] },
+  jurisdiction: { nodeLabels: ['Jurisdiction','Regulator','Sector'], edges: ['INCORPORATED_IN','OPERATES_IN','REGULATED_BY'] },
+  ontology: { nodeLabels: ['Class'], edges: ['SCO','RDF_TYPE'] }
+};
+
+async function loadGraph() {
+  $('status').textContent = 'Connecting...';
+  $('error').style.display = 'none';
+  const url = $('url').value;
+  const boltUrl = url.replace('neo4j://', 'bolt://');
+
+  try {
+    // Use fetch to Neo4j HTTP API for data
+    const txUrl = url.replace('neo4j://', 'http://').replace(':7687', ':7474') + '/db/' + 'neo4j' + '/tx/commit';
+    const auth = 'Basic ' + btoa($('user').value + ':' + $('pwd').value);
+
+    const query = `
+      MATCH (n)
+      OPTIONAL MATCH (n)-[r]->(m)
+      RETURN
+        id(n) AS srcId, labels(n) AS srcLabels, properties(n) AS srcProps,
+        type(r) AS relType, properties(r) AS relProps,
+        id(m) AS tgtId, labels(m) AS tgtLabels, properties(m) AS tgtProps
+      LIMIT 2000
+    `;
+
+    const resp = await fetch(txUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+      body: JSON.stringify({ statements: [{ statement: query }] })
+    });
+    const data = await resp.json();
+
+    if (data.errors && data.errors.length > 0) {
+      throw new Error(data.errors.map(e => e.message).join('\n'));
+    }
+
+    const rows = data.results[0].data;
+    const nodeMap = new Map();
+    const edgeList = [];
+
+    for (const row of rows) {
+      const [srcId, srcLabels, srcProps, relType, relProps, tgtId, tgtLabels, tgtProps] = row.row;
+
+      if (!nodeMap.has(srcId)) {
+        const primaryLabel = pickLabel(srcLabels);
+        nodeMap.set(srcId, {
+          id: srcId, label: srcProps.name || srcProps.code || srcProps.uri?.split('/').pop()?.split('#').pop() || `Node ${srcId}`,
+          color: NODE_COLORS[primaryLabel] || '#6b7280',
+          shape: getShape(primaryLabel),
+          size: getSize(primaryLabel, srcProps),
+          title: buildTooltip(srcLabels, srcProps),
+          _labels: srcLabels, _props: srcProps, _primaryLabel: primaryLabel
+        });
+      }
+      if (tgtId != null && !nodeMap.has(tgtId)) {
+        const primaryLabel = pickLabel(tgtLabels);
+        nodeMap.set(tgtId, {
+          id: tgtId, label: tgtProps.name || tgtProps.code || tgtProps.uri?.split('/').pop()?.split('#').pop() || `Node ${tgtId}`,
+          color: NODE_COLORS[primaryLabel] || '#6b7280',
+          shape: getShape(primaryLabel),
+          size: getSize(primaryLabel, tgtProps),
+          title: buildTooltip(tgtLabels, tgtProps),
+          _labels: tgtLabels, _props: tgtProps, _primaryLabel: primaryLabel
+        });
+      }
+      if (relType) {
+        edgeList.push({
+          from: srcId, to: tgtId,
+          color: { color: EDGE_COLORS[relType] || '#555', opacity: 0.8 },
+          arrows: 'to',
+          label: relType === 'HAS_OWNERSHIP_IN' ? (relProps?.percent ? relProps.percent + '%' : '') :
+                 relType === 'LENDS_TO' ? (relProps?.exposure_musd ? '$' + relProps.exposure_musd + 'M' : '') : '',
+          title: `${relType}` + (relProps ? '\n' + JSON.stringify(relProps, null, 1) : ''),
+          dashes: relType === 'HAS_CONTROLLING_PARTY' || relType === 'JOINT_VENTURE',
+          width: relType === 'LENDS_TO' ? 2 : relType === 'HAS_OWNERSHIP_IN' ? 1.5 : 1,
+          _type: relType
+        });
+      }
+    }
+
+    allNodes = Array.from(nodeMap.values());
+    allEdges = edgeList;
+    renderGraph();
+    updateStats();
+    $('status').textContent = `Loaded: ${allNodes.length} nodes, ${allEdges.length} edges`;
+  } catch(e) {
+    $('error').textContent = e.message; $('error').style.display = 'block';
+    $('status').textContent = 'Error';
+  }
+}
+
+function pickLabel(labels) {
+  const priority = ['Bank','Holding','Regulator','Jurisdiction','Sector','Class','Corporation','LegalEntity'];
+  for (const p of priority) { if (labels.includes(p)) return p; }
+  return labels[0] || 'Unknown';
+}
+function getShape(label) {
+  if (label === 'Jurisdiction') return 'diamond';
+  if (label === 'Regulator') return 'triangle';
+  if (label === 'Bank') return 'star';
+  if (label === 'Class') return 'square';
+  if (label === 'Sector') return 'hexagon';
+  return 'dot';
+}
+function getSize(label, props) {
+  if (label === 'Bank') return 28;
+  if (label === 'Holding') return 24;
+  if (props.systemicScore) return 12 + props.systemicScore * 20;
+  if (label === 'Class') return 10;
+  return 16;
+}
+function buildTooltip(labels, props) {
+  let t = `[${labels.join(', ')}]\n`;
+  for (const [k,v] of Object.entries(props)) {
+    if (k === 'uri' && v && v.length > 60) t += `${k}: ...${v.slice(-50)}\n`;
+    else t += `${k}: ${v}\n`;
+  }
+  return t;
+}
+
+function renderGraph() {
+  const activeLayers = getActiveLayers();
+  const visibleNodeLabels = new Set();
+  const visibleEdgeTypes = new Set();
+  activeLayers.forEach(l => {
+    LAYER_MAP[l].nodeLabels.forEach(lb => visibleNodeLabels.add(lb));
+    LAYER_MAP[l].edges.forEach(e => visibleEdgeTypes.add(e));
+  });
+
+  const filteredNodes = allNodes.filter(n => visibleNodeLabels.has(n._primaryLabel));
+  const nodeIds = new Set(filteredNodes.map(n => n.id));
+  const filteredEdges = allEdges.filter(e => visibleEdgeTypes.has(e._type) && nodeIds.has(e.from) && nodeIds.has(e.to));
+
+  // Also include nodes referenced by visible edges
+  for (const e of allEdges) {
+    if (visibleEdgeTypes.has(e._type)) {
+      if (!nodeIds.has(e.from)) { const n = allNodes.find(nd => nd.id === e.from); if (n) { filteredNodes.push(n); nodeIds.add(n.id); } }
+      if (!nodeIds.has(e.to)) { const n = allNodes.find(nd => nd.id === e.to); if (n) { filteredNodes.push(n); nodeIds.add(n.id); } }
+    }
+  }
+  const finalEdges = allEdges.filter(e => visibleEdgeTypes.has(e._type) && nodeIds.has(e.from) && nodeIds.has(e.to));
+
+  nodesDS = new vis.DataSet(filteredNodes);
+  edgesDS = new vis.DataSet(finalEdges);
+
+  const layout = $('layoutSelect').value;
+  const options = {
+    nodes: { font: { color: '#e2e8f0', size: 11 }, borderWidth: 1 },
+    edges: { font: { color: '#94a3b8', size: 9, strokeWidth: 0 }, smooth: { type: 'curvedCW', roundness: 0.1 } },
+    physics: layout === 'physics' ? { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -60, springLength: 120 }, stabilization: { iterations: 150 } } : false,
+    layout: layout === 'hierarchical' ? { hierarchical: { direction: 'UD', sortMethod: 'hubsize', levelSeparation: 120, nodeSpacing: 80 } } :
+            layout === 'radial' ? { hierarchical: { direction: 'UD', sortMethod: 'directed', levelSeparation: 150 } } : {},
+    interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true }
+  };
+
+  if (network) network.destroy();
+  network = new vis.Network($('graph'), { nodes: nodesDS, edges: edgesDS }, options);
+  network.on('click', params => {
+    if (params.nodes.length > 0) {
+      const nd = allNodes.find(n => n.id === params.nodes[0]);
+      if (nd) $('details').innerHTML = `<strong>${nd.label}</strong><pre>${nd.title}</pre>`;
+    } else if (params.edges.length > 0) {
+      const ed = edgesDS.get(params.edges[0]);
+      if (ed) $('details').innerHTML = `<strong>${ed._type || 'Edge'}</strong><pre>${ed.title || ''}</pre>`;
+    }
+  });
+}
+
+function getActiveLayers() {
+  return [...document.querySelectorAll('#filters span.active')].map(s => s.dataset.layer);
+}
+function updateStats() {
+  const labels = {}; allNodes.forEach(n => { labels[n._primaryLabel] = (labels[n._primaryLabel]||0)+1; });
+  const rels = {}; allEdges.forEach(e => { rels[e._type] = (rels[e._type]||0)+1; });
+  let html = '';
+  for (const [k,v] of Object.entries(labels)) html += `<span class="k">${k}</span><span class="v">${v}</span>`;
+  html += `<span class="k">──────</span><span class="v">──</span>`;
+  for (const [k,v] of Object.entries(rels)) html += `<span class="k">${k}</span><span class="v">${v}</span>`;
+  $('statsGrid').innerHTML = html;
+}
+
+// Event listeners
+$('btnLoad').addEventListener('click', loadGraph);
+$('btnFit').addEventListener('click', () => network && network.fit());
+$('btnExport').addEventListener('click', () => {
+  if (!network) return;
+  const canvas = $('graph').querySelector('canvas');
+  if (canvas) { const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'fibo_graph.png'; a.click(); }
+});
+$('layoutSelect').addEventListener('change', () => { if (allNodes.length) renderGraph(); });
+
+document.querySelectorAll('#filters span').forEach(tag => {
+  tag.addEventListener('click', () => {
+    tag.classList.toggle('active');
+    if (allNodes.length) renderGraph();
+  });
+});
+
+// Auto-load on page open
+window.addEventListener('load', () => setTimeout(loadGraph, 300));
+</script>
+</body>
+</html>

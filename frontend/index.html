@@ -26,6 +26,7 @@
   .legend{font-size:11px;color:var(--muted)}
   .legend span{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
   .err{color:#f87171;font-size:12px;white-space:pre-wrap}
+  .info{color:#34d399;font-size:12px;margin:4px 0}
 </style>
 </head>
 <body>
@@ -34,20 +35,25 @@
   <p class="lead">neovis.js view of the seeded LEI / ownership / control graph in your local Neo4j.</p>
 
   <h2>Connection</h2>
-  <label>URL <input id="url" value="bolt://127.0.0.1:7687" /></label>
+  <label>URL <input id="url" value="neo4j://127.0.0.1:7687" /></label>
   <label>User <input id="user" value="neo4j" /></label>
   <label>Password <input id="pw" type="password" value="12345678" /></label>
   <label>Database <input id="db" value="neo4j" /></label>
+  <button id="testConn" class="secondary">Test Connection</button>
+  <div class="info" id="connStatus"></div>
 
   <h2>Presets</h2>
+  <button class="preset" data-q="MATCH (n:LegalEntity)-[r]->(m:LegalEntity) RETURN n,r,m">
+    <b>Full entity network</b><br><span class="legend">All inter-entity relationships</span>
+  </button>
   <button class="preset" data-q="MATCH (n:LegalEntity)-[r:HAS_OWNERSHIP_IN]->(m:LegalEntity) RETURN n,r,m">
     <b>Ownership network</b><br><span class="legend">All HAS_OWNERSHIP_IN edges</span>
   </button>
-  <button class="preset" data-q="MATCH (b:Bank)-[r:LENDS_TO]->(e:LegalEntity) OPTIONAL MATCH p=(e)-[:HAS_CONTROLLING_PARTY*0..4]->(top) RETURN b,r,e,p">
-    <b>Bank exposures + control chains</b>
+  <button class="preset" data-q="MATCH (b:Bank)-[r:LENDS_TO]->(e:LegalEntity) RETURN b,r,e">
+    <b>Bank lending exposures</b>
   </button>
-  <button class="preset" data-q="MATCH p=(root:LegalEntity {name:'Apex Holdings Inc.'})-[:HAS_OWNERSHIP_IN*1..5]->(c) RETURN p">
-    <b>Apex group default-cascade</b>
+  <button class="preset" data-q="MATCH p=(root:LegalEntity {name:'Apex Holdings Inc.'})-[:HAS_OWNERSHIP_IN|HAS_CONTROLLING_PARTY*1..5]->(c) RETURN p">
+    <b>Apex group cascade</b>
   </button>
   <button class="preset" data-q="MATCH p=(e:LegalEntity)-[:HAS_OWNERSHIP_IN*2..6]->(e) RETURN p LIMIT 5">
     <b>Circular ownership (KYC red flag)</b>
@@ -55,12 +61,18 @@
   <button class="preset" data-q="MATCH (e:LegalEntity)-[r:REGULATED_BY]->(reg:Regulator) RETURN e,r,reg">
     <b>Regulatory perimeter</b>
   </button>
-  <button class="preset" data-q="MATCH (sub:LegalEntity)-[r:HAS_CONTROLLING_PARTY]->(parent:LegalEntity) MATCH (sub)-[:INCORPORATED_IN]->(jSub) MATCH (parent)-[:INCORPORATED_IN]->(jPar) WHERE jSub <> jPar RETURN sub,r,parent,jSub,jPar">
-    <b>Cross-border control</b>
+  <button class="preset" data-q="MATCH (e:LegalEntity)-[r:INCORPORATED_IN]->(j:Jurisdiction) RETURN e,r,j">
+    <b>Jurisdiction map</b>
+  </button>
+  <button class="preset" data-q="MATCH (sub:LegalEntity)-[r:HAS_CONTROLLING_PARTY]->(parent:LegalEntity) RETURN sub,r,parent">
+    <b>Control hierarchy</b>
+  </button>
+  <button class="preset" data-q="MATCH (c:Class)-[r:SCO]->(p:Class) RETURN c,r,p LIMIT 100">
+    <b>FIBO T-Box (ontology classes)</b>
   </button>
 
   <h2>Custom Cypher</h2>
-  <textarea id="cypher">MATCH (n:LegalEntity)-[r:HAS_OWNERSHIP_IN]->(m:LegalEntity) RETURN n,r,m</textarea>
+  <textarea id="cypher">MATCH (n:LegalEntity)-[r]->(m:LegalEntity) RETURN n,r,m</textarea>
   <button id="run">Render</button>
   <button id="stabilize" class="secondary">Stabilize layout</button>
   <button id="clear" class="secondary">Clear</button>
@@ -73,13 +85,14 @@
     <div><span style="background:#34d399"></span>Jurisdiction</div>
     <div><span style="background:#f472b6"></span>Regulator</div>
     <div><span style="background:#94a3b8"></span>Sector</div>
+    <div><span style="background:#64748b"></span>Class (ontology)</div>
   </div>
   <p class="lead" id="status"></p>
   <div class="err" id="err"></div>
 </aside>
 <main><div id="viz"></div></main>
 
-<script src="https://unpkg.com/neovis.js@2.1.0"></script>
+<script src="https://unpkg.com/neovis.js@2.1.0/dist/neovis.js"></script>
 <script>
 let viz;
 const $ = id => document.getElementById(id);
@@ -88,7 +101,7 @@ function buildConfig(cypher) {
   return {
     containerId: 'viz',
     neo4j: {
-      serverUrl:      $('url').value,
+      serverUrl:      $('url').value.replace('neo4j://', 'bolt://'),
       serverUser:     $('user').value,
       serverPassword: $('pw').value,
       serverDatabase: $('db').value
@@ -99,23 +112,25 @@ function buildConfig(cypher) {
       physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -50, springLength: 120 }, stabilization: { iterations: 200 } }
     },
     labels: {
-      LegalEntity:  { label: 'name', size: 'systemicScore', group: 'communityId', color: '#a78bfa' },
-      Corporation:  { label: 'name', size: 'systemicScore', group: 'communityId', color: '#a78bfa' },
-      Holding:      { label: 'name', size: 'systemicScore', group: 'communityId', color: '#22d3ee' },
-      Bank:         { label: 'name', color: '#f59e0b' },
-      Jurisdiction: { label: 'code', color: '#34d399' },
-      Regulator:    { label: 'name', color: '#f472b6' },
-      Sector:       { label: 'name', color: '#94a3b8' },
-      Class:        { label: 'label', color: '#64748b' }
+      LegalEntity:  { label: 'name', value: 'systemicScore', group: 'communityId', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: '#a78bfa', shape: 'dot' } } },
+      Corporation:  { label: 'name', value: 'systemicScore', group: 'communityId', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: '#a78bfa', shape: 'dot' } } },
+      Holding:      { label: 'name', value: 'systemicScore', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: '#22d3ee', shape: 'dot' } } },
+      Bank:         { label: 'name', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: '#f59e0b', shape: 'star', size: 30 } } },
+      Jurisdiction: { label: 'code', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: '#34d399', shape: 'diamond', size: 15 } } },
+      Regulator:    { label: 'name', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: '#f472b6', shape: 'triangle', size: 20 } } },
+      Sector:       { label: 'name', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: '#94a3b8', shape: 'square', size: 12 } } },
+      Class:        { label: 'name', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: '#64748b', shape: 'dot', size: 10 } } }
     },
     relationships: {
-      HAS_OWNERSHIP_IN:      { label: 'percent', value: 'weight', color: '#38bdf8' },
-      HAS_CONTROLLING_PARTY: { color: '#f87171' },
-      LENDS_TO:              { label: 'exposure_musd', value: 'exposure_musd', color: '#fbbf24' },
-      INCORPORATED_IN:       { color: '#34d399' },
-      OPERATES_IN:           { color: '#94a3b8' },
-      REGULATED_BY:          { color: '#f472b6' },
-      SCO:                   { color: '#475569' }
+      HAS_OWNERSHIP_IN:      { value: 'weight', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#38bdf8' }, label: 'owns' } } },
+      HAS_CONTROLLING_PARTY: { [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#f87171' }, dashes: true, label: 'controls' } } },
+      LENDS_TO:              { value: 'exposure_musd', [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#fbbf24' }, label: 'lends' } } },
+      INCORPORATED_IN:       { [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#34d399', opacity: 0.5 } } } },
+      OPERATES_IN:           { [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#94a3b8', opacity: 0.4 } } } },
+      REGULATED_BY:          { [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#f472b6' } } } },
+      SCO:                   { [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#475569' }, label: 'subClassOf' } } },
+      JOINT_VENTURE:         { [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#a3e635' }, dashes: [5,5] } } },
+      SUPPLIES_TO:           { [NeoVis.NEOVIS_ADVANCED_CONFIG]: { static: { color: { color: '#fb923c' } } } }
     },
     initialCypher: cypher
   };
@@ -125,18 +140,31 @@ function render(cypher) {
   $('err').textContent = '';
   $('status').textContent = 'Querying...';
   try {
+    if (viz) { viz.clearNetwork(); }
     viz = new NeoVis.default(buildConfig(cypher));
     viz.registerOnEvent('completed', e => {
-      $('status').textContent = `Rendered. Records: ${e?.recordCount ?? '?'}`;
+      $('status').textContent = 'Rendered. Nodes: ' + (viz.nodes?.length || '?') + ', Edges: ' + (viz.edges?.length || '?');
     });
     viz.registerOnEvent('error', e => {
       $('err').textContent = (e && e.error && e.error.message) || JSON.stringify(e);
+      $('status').textContent = '';
     });
     viz.render();
   } catch (e) {
     $('err').textContent = String(e);
+    $('status').textContent = '';
   }
 }
+
+$('testConn').addEventListener('click', async () => {
+  $('connStatus').textContent = 'Testing...';
+  try {
+    const tmpViz = new NeoVis.default(buildConfig('RETURN 1'));
+    tmpViz.registerOnEvent('completed', () => { $('connStatus').textContent = 'Connected!'; tmpViz.clearNetwork(); });
+    tmpViz.registerOnEvent('error', e => { $('connStatus').textContent = 'Failed: ' + ((e && e.error && e.error.message) || JSON.stringify(e)); });
+    tmpViz.render();
+  } catch(e) { $('connStatus').textContent = 'Error: ' + e; }
+});
 
 document.querySelectorAll('.preset').forEach(b => b.addEventListener('click', () => {
   $('cypher').value = b.dataset.q; render(b.dataset.q);

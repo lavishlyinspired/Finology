@@ -3,3 +3,7 @@
 pycache/
 __pycache__/
 *.pyc
+node_modules
+dist/
+build/
+frontend-react\node_modules

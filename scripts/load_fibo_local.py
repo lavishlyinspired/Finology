@@ -31,7 +31,7 @@ FIBO_BASE = "https://spec.edmcouncil.org/fibo/ontology/master/latest"
 # Curated, focused subset (FND + BE + a touch of FBC) for the LEI/counterparty story.
 FILES = [
     # --- FND (Foundations) ---
-    "FND/AgreementsAndContracts/Agreements.rdf",
+    "FND/Agreements/Agreements.rdf",
     "FND/Parties/Parties.rdf",
     "FND/Relations/Relations.rdf",
     "FND/Utilities/AnnotationVocabulary.rdf",
@@ -41,8 +41,8 @@ FILES = [
     "BE/LegalEntities/LEIEntities.rdf",
     "BE/LegalEntities/CorporateBodies.rdf",
     "BE/Corporations/Corporations.rdf",
-    "BE/OwnershipAndControl/Ownership.rdf",
-    "BE/OwnershipAndControl/Control.rdf",
+    "BE/OwnershipAndControl/CorporateOwnership.rdf",
+    "BE/OwnershipAndControl/CorporateControl.rdf",
     "BE/OwnershipAndControl/OwnershipParties.rdf",
     "BE/FunctionalEntities/FunctionalEntities.rdf",
     "BE/Partnerships/Partnerships.rdf",
@@ -77,7 +77,8 @@ def main() -> None:
                 continue
             try:
                 row = s.run(
-                    "CALL n10s.rdf.import.inline($payload, 'RDF/XML')"
+                    "CALL n10s.rdf.import.inline($payload, 'RDF/XML')",
+                    payload=payload
                 ).single().data()
                 status = row.get("terminationStatus")
                 loaded = row.get("triplesLoaded", 0)

@@ -11,3 +11,4 @@ ipykernel>=6.29
 pyvis>=0.3.2
 rdflib>=7.0
 requests>=2.31
+RDFGraph
