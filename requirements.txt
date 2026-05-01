@@ -1,0 +1,13 @@
+neo4j>=5.20
+graphdatascience>=1.10
+pandas>=2.2
+numpy>=1.26
+matplotlib>=3.8
+seaborn>=0.13
+networkx>=3.2
+python-dotenv>=1.0
+jupyter>=1.0
+ipykernel>=6.29
+pyvis>=0.3.2
+rdflib>=7.0
+requests>=2.31

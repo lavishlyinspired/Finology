@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>FIBO Counterparty Risk — neovis.js</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg:#0f172a; --panel:#111c33; --border:#1e2a4a; --text:#e6edf7; --muted:#94a3b8; --accent:#38bdf8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:grid;grid-template-columns:340px 1fr;height:100vh}
+  aside{background:var(--panel);border-right:1px solid var(--border);padding:16px;overflow:auto}
+  h1{font-size:16px;margin:0 0 4px;color:var(--accent)}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:18px 0 6px}
+  p.lead{color:var(--muted);font-size:12px;margin:0 0 12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+  input,select,button,textarea{width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:#0b1426;color:var(--text);font:inherit}
+  textarea{min-height:120px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  button{background:var(--accent);color:#04263b;border:0;font-weight:600;cursor:pointer;margin-top:6px}
+  button.secondary{background:#1e2a4a;color:var(--text)}
+  .preset{display:block;width:100%;text-align:left;background:#0b1426;border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;margin-bottom:6px;cursor:pointer}
+  .preset:hover{border-color:var(--accent)}
+  .preset b{color:var(--accent)}
+  #viz{width:100%;height:100vh;background:#0a1224}
+  .legend{font-size:11px;color:var(--muted)}
+  .legend span{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
+  .err{color:#f87171;font-size:12px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<aside>
+  <h1>FIBO Counterparty Risk</h1>
+  <p class="lead">neovis.js view of the seeded LEI / ownership / control graph in your local Neo4j.</p>
+
+  <h2>Connection</h2>
+  <label>URL <input id="url" value="bolt://127.0.0.1:7687" /></label>
+  <label>User <input id="user" value="neo4j" /></label>
+  <label>Password <input id="pw" type="password" value="12345678" /></label>
+  <label>Database <input id="db" value="neo4j" /></label>
+
+  <h2>Presets</h2>
+  <button class="preset" data-q="MATCH (n:LegalEntity)-[r:HAS_OWNERSHIP_IN]->(m:LegalEntity) RETURN n,r,m">
+    <b>Ownership network</b><br><span class="legend">All HAS_OWNERSHIP_IN edges</span>
+  </button>
+  <button class="preset" data-q="MATCH (b:Bank)-[r:LENDS_TO]->(e:LegalEntity) OPTIONAL MATCH p=(e)-[:HAS_CONTROLLING_PARTY*0..4]->(top) RETURN b,r,e,p">
+    <b>Bank exposures + control chains</b>
+  </button>
+  <button class="preset" data-q="MATCH p=(root:LegalEntity {name:'Apex Holdings Inc.'})-[:HAS_OWNERSHIP_IN*1..5]->(c) RETURN p">
+    <b>Apex group default-cascade</b>
+  </button>
+  <button class="preset" data-q="MATCH p=(e:LegalEntity)-[:HAS_OWNERSHIP_IN*2..6]->(e) RETURN p LIMIT 5">
+    <b>Circular ownership (KYC red flag)</b>
+  </button>
+  <button class="preset" data-q="MATCH (e:LegalEntity)-[r:REGULATED_BY]->(reg:Regulator) RETURN e,r,reg">
+    <b>Regulatory perimeter</b>
+  </button>
+  <button class="preset" data-q="MATCH (sub:LegalEntity)-[r:HAS_CONTROLLING_PARTY]->(parent:LegalEntity) MATCH (sub)-[:INCORPORATED_IN]->(jSub) MATCH (parent)-[:INCORPORATED_IN]->(jPar) WHERE jSub <> jPar RETURN sub,r,parent,jSub,jPar">
+    <b>Cross-border control</b>
+  </button>
+
+  <h2>Custom Cypher</h2>
+  <textarea id="cypher">MATCH (n:LegalEntity)-[r:HAS_OWNERSHIP_IN]->(m:LegalEntity) RETURN n,r,m</textarea>
+  <button id="run">Render</button>
+  <button id="stabilize" class="secondary">Stabilize layout</button>
+  <button id="clear" class="secondary">Clear</button>
+
+  <h2>Legend</h2>
+  <div class="legend">
+    <div><span style="background:#f59e0b"></span>Bank</div>
+    <div><span style="background:#22d3ee"></span>Holding</div>
+    <div><span style="background:#a78bfa"></span>Corporation / LegalEntity</div>
+    <div><span style="background:#34d399"></span>Jurisdiction</div>
+    <div><span style="background:#f472b6"></span>Regulator</div>
+    <div><span style="background:#94a3b8"></span>Sector</div>
+  </div>
+  <p class="lead" id="status"></p>
+  <div class="err" id="err"></div>
+</aside>
+<main><div id="viz"></div></main>
+
+<script src="https://unpkg.com/neovis.js@2.1.0"></script>
+<script>
+let viz;
+const $ = id => document.getElementById(id);
+
+function buildConfig(cypher) {
+  return {
+    containerId: 'viz',
+    neo4j: {
+      serverUrl:      $('url').value,
+      serverUser:     $('user').value,
+      serverPassword: $('pw').value,
+      serverDatabase: $('db').value
+    },
+    visConfig: {
+      nodes: { shape: 'dot', font: { color: '#e6edf7', size: 14 } },
+      edges: { arrows: { to: { enabled: true, scaleFactor: 0.7 } }, font: { color: '#94a3b8', size: 10, strokeWidth: 0 } },
+      physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -50, springLength: 120 }, stabilization: { iterations: 200 } }
+    },
+    labels: {
+      LegalEntity:  { label: 'name', size: 'systemicScore', group: 'communityId', color: '#a78bfa' },
+      Corporation:  { label: 'name', size: 'systemicScore', group: 'communityId', color: '#a78bfa' },
+      Holding:      { label: 'name', size: 'systemicScore', group: 'communityId', color: '#22d3ee' },
+      Bank:         { label: 'name', color: '#f59e0b' },
+      Jurisdiction: { label: 'code', color: '#34d399' },
+      Regulator:    { label: 'name', color: '#f472b6' },
+      Sector:       { label: 'name', color: '#94a3b8' },
+      Class:        { label: 'label', color: '#64748b' }
+    },
+    relationships: {
+      HAS_OWNERSHIP_IN:      { label: 'percent', value: 'weight', color: '#38bdf8' },
+      HAS_CONTROLLING_PARTY: { color: '#f87171' },
+      LENDS_TO:              { label: 'exposure_musd', value: 'exposure_musd', color: '#fbbf24' },
+      INCORPORATED_IN:       { color: '#34d399' },
+      OPERATES_IN:           { color: '#94a3b8' },
+      REGULATED_BY:          { color: '#f472b6' },
+      SCO:                   { color: '#475569' }
+    },
+    initialCypher: cypher
+  };
+}
+
+function render(cypher) {
+  $('err').textContent = '';
+  $('status').textContent = 'Querying...';
+  try {
+    viz = new NeoVis.default(buildConfig(cypher));
+    viz.registerOnEvent('completed', e => {
+      $('status').textContent = `Rendered. Records: ${e?.recordCount ?? '?'}`;
+    });
+    viz.registerOnEvent('error', e => {
+      $('err').textContent = (e && e.error && e.error.message) || JSON.stringify(e);
+    });
+    viz.render();
+  } catch (e) {
+    $('err').textContent = String(e);
+  }
+}
+
+document.querySelectorAll('.preset').forEach(b => b.addEventListener('click', () => {
+  $('cypher').value = b.dataset.q; render(b.dataset.q);
+}));
+$('run').addEventListener('click', () => render($('cypher').value));
+$('stabilize').addEventListener('click', () => viz && viz.stabilize());
+$('clear').addEventListener('click', () => viz && viz.clearNetwork());
+
+window.addEventListener('load', () => render($('cypher').value));
+</script>
+</body>
+</html>
